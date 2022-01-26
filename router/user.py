@@ -1,5 +1,4 @@
 import datetime
-
 import sqlalchemy.exc
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -50,3 +49,4 @@ def user_me(user: User = Depends(get_user)):
         username=user.username,
         id=user.id
     )
+

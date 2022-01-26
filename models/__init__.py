@@ -35,29 +35,29 @@ class User(Base):
 
 class File(Base):
     __tablename__ = 'files'
-    id = Column('id', UUID, primary_key=True)
+    id = Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     object_id = Column('object_id', ForeignKey('objects.id'))
-    object = relationship("Object", back_populates="children")
+    # object = relationship("Object", back_populates="children")
 
 
 class Object(Base):
     __tablename__ = 'objects'
-    id = Column('id', UUID, default=uuid.uuid4, primary_key=True)
+    id = Column('id', UUID(as_uuid=True),primary_key=True, default=uuid.uuid4)
     keyname = Column('keyname', String(1024), index=True, nullable=False)
-    files = relationship("File", back_populates="parent")
+    # files = relationship("File", back_populates="parent")
+    #
 
 
 class UserObject(Base):
     __tablename__ = 'user_objects'
-    user_id = Column('user_id', ForeignKey('users.id'), primary_key=True)
-    object_id = Column('object_id', ForeignKey('objects.id'), primary_key=True)
+    user_id = Column('user_id', ForeignKey(User.id), primary_key=True)
+    object_id = Column('object_id', ForeignKey(Object.id), primary_key=True)
     namespace = Column('namespace', String(20))
     owner = Column('owner', Boolean)
     read_perm = Column('read_perm', Boolean)
-    write_perm = Column('write_perm', Boolean)
     update_perm = Column('update_perm', Boolean)
-    object = relationship('Object')
-    user = relationship('User')
+    # object = relationship('Object')
+    # user = relationship('User')
 
 
 Base.metadata.create_all(bind=engine)
