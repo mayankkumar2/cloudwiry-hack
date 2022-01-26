@@ -1,6 +1,7 @@
+from datetime import datetime
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import Column, String, ForeignKey, Boolean
+from sqlalchemy import Column, String, ForeignKey, Boolean, DateTime
 from connection.con import engine
 import uuid
 from passlib.context import CryptContext
@@ -14,6 +15,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username = Column(String(20), nullable=False, index=True, unique=True)
     password = Column(String(512), nullable=False)
+    objects = relationship("UserObject", back_populates="user")
 
     @staticmethod
     def __get_crypt_context():
@@ -37,15 +39,16 @@ class File(Base):
     __tablename__ = 'files'
     id = Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     object_id = Column('object_id', ForeignKey('objects.id'))
-    # object = relationship("Object", back_populates="children")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    object = relationship("Object", back_populates="files")
 
 
 class Object(Base):
     __tablename__ = 'objects'
     id = Column('id', UUID(as_uuid=True),primary_key=True, default=uuid.uuid4)
     keyname = Column('keyname', String(1024), index=True, nullable=False)
-    # files = relationship("File", back_populates="parent")
-    #
+    files = relationship("File", back_populates="object")
+    permissions = relationship("UserObject", back_populates="object")
 
 
 class UserObject(Base):
@@ -56,8 +59,8 @@ class UserObject(Base):
     owner = Column('owner', Boolean)
     read_perm = Column('read_perm', Boolean)
     update_perm = Column('update_perm', Boolean)
-    # object = relationship('Object')
-    # user = relationship('User')
+    object = relationship('Object', back_populates="permissions")
+    user = relationship('User', back_populates="objects")
 
 
 Base.metadata.create_all(bind=engine)

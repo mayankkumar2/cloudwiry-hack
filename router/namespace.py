@@ -7,15 +7,18 @@ from models import User, UserObject
 from router.middleware import get_user
 from schemas.namespace_response import NamespaceList
 from .file import router as file_router
-
+from .objects import router as object_router
 router = APIRouter()
 
 
-@router.post("/list")
+@router.get("/list")
 def list_namespaces(db: Session = Depends(get_pg_db), user: User = Depends(get_user)):
     with db.connection() as con:
         try:
-            rs = con.execute(text("SELECT DISTINCT namespace FROM user_objects WHERE user_id = :id"), id=user.id)
+            rs = con.execute(
+                text("SELECT DISTINCT namespace FROM user_objects WHERE user_id = :id"),
+                id=user.id
+            )
             namespaces = []
             for r in rs:
                 namespaces.append(r[0])
@@ -31,4 +34,9 @@ def list_namespaces(db: Session = Depends(get_pg_db), user: User = Depends(get_u
 router.include_router(
     prefix="/file",
     router=file_router
+)
+
+router.include_router(
+    prefix="/{namespace_id}/object",
+    router=object_router
 )
