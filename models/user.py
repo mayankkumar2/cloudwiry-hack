@@ -4,6 +4,7 @@ from sqlalchemy import Column, String
 from connection.con import engine
 import uuid
 import hashlib
+from passlib.context import CryptContext
 
 
 class User(Base):
@@ -13,17 +14,21 @@ class User(Base):
     password = Column(String(512), nullable=False)
 
     @staticmethod
-    def __calc_password(password):
-        return hashlib.sha3_512(bytes(password, 'utf-8')).hexdigest()
+    def __get_crypt_context():
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        return pwd_context
+
+    @staticmethod
+    def __calc_password(password) -> str:
+        return User.__get_crypt_context().hash(password)
 
     def set_password(self, password):
         self.password = self.__calc_password(password)
 
-    def cmp_password(self, str1, str2) -> bool:
-        return str1 == self.__calc_password(str2)
+    def cmp_password(self, pwd) -> bool:
+        return User.__get_crypt_context().verify(pwd, self.password)
 
     pass
 
 
 Base.metadata.create_all(bind=engine)
-
