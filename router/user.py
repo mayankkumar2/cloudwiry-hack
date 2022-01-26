@@ -4,11 +4,10 @@ import sqlalchemy.exc
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, status
-
 import utils.jwt
 from schemas.user_requests import CreateUserRequest, UserLoginRequest
 from connection.con import get_pg_db
-from models.user import User
+from models import User
 from router.middleware import get_user
 from schemas.user_response import LoginResponse, UserResponse
 
@@ -33,7 +32,9 @@ async def login_user(usr: UserLoginRequest, db: Session = Depends(get_pg_db)):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="invalid password"
             )
-        jwt_token = await utils.jwt.jwt_encode(data={"username": user.username}, expires_delta=datetime.timedelta(days=10))
+        jwt_token = await utils.jwt.jwt_encode(
+            data={"username": user.username},
+            expires_delta=datetime.timedelta(days=10))
         return LoginResponse(token=jwt_token)
 
     except sqlalchemy.exc.NoResultFound:

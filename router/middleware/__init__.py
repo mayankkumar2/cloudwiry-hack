@@ -2,7 +2,7 @@ import sqlalchemy.exc
 from jose import JWTError
 from fastapi import Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
-from models.user import User
+from models import User
 import connection.con
 import utils.jwt
 import re
