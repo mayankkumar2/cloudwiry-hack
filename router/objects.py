@@ -1,15 +1,22 @@
+import base64
+import mimetypes
 import uuid
 import sqlalchemy.exc
 from fastapi import Depends
-from sqlalchemy import text
+from sqlalchemy import text, desc
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Response
+
+import filesystem
 from connection.con import get_pg_db
-from models import User, UserObject, Object
+from models import User, UserObject, Object, FileMetadata, File
 from router.middleware import get_user
+from schemas.file_request import FileModel
+from schemas.files_reponse import FileResponse
 from schemas.object_response import ObjectsListResponse
 from factory.file_factory import FileFactory
 from router.permission import router as permission_router
+from service import file_svc
 
 router = APIRouter()
 
@@ -63,7 +70,7 @@ async def object_key_rename(namespace_id: str, object_id: uuid.UUID, key: str, d
 
 
 @router.put("/{object_id}/save")
-async def update_object(namespace_id: str, object_id: uuid.UUID, db: Session = Depends(get_pg_db),
+async def update_object(f: FileModel, namespace_id: str, object_id: uuid.UUID, db: Session = Depends(get_pg_db),
                         user: User = Depends(get_user)):
     try:
         obj, usr_obj = db.query(Object, UserObject) \
@@ -71,12 +78,16 @@ async def update_object(namespace_id: str, object_id: uuid.UUID, db: Session = D
                     (Object.id == UserObject.object_id) &
                     (Object.id == object_id)).one()
 
-        if not usr_obj.owner:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to rename")
+        if not usr_obj.update_perm:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to update the file")
 
         file = FileFactory(obj).create()
         db.add(file)
         db.commit()
+
+        filesystem.create_file_fs(file, base64.b64decode(f.content))
+
+        FileMetadata(file_id=file.id, filename=f.filename).save()
 
         return {
             "status": "ok"
@@ -95,16 +106,86 @@ async def object_key_delete(namespace_id: str, object_id: uuid.UUID, db: Session
                     (Object.id == object_id)).one()
 
         if not usr_obj.owner:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to rename")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to delete")
 
         with db.connection() as con:
             con.execute(text("DELETE FROM user_objects WHERE object_id = :obj_id"), obj_id=obj.id)
             con.execute(text("DELETE FROM files WHERE object_id = :obj_id"), obj_id=obj.id)
             con.execute(text("DELETE FROM objects WHERE id = :obj_id"), obj_id=obj.id)
-
+            con.execute(text("COMMIT"))
         return {
-            "status": "ok"
+            "status": "success"
         }
+    except sqlalchemy.exc.NoResultFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e)
+
+
+@router.get("/{object_id}/versions", response_model=list[FileResponse])
+async def object_key_versions(namespace_id: str, object_id: uuid.UUID, db: Session = Depends(get_pg_db),
+                              user: User = Depends(get_user)):
+    try:
+        obj, usr_obj = db.query(Object, UserObject) \
+            .filter((UserObject.user_id == user.id) &
+                    (Object.id == UserObject.object_id) &
+                    (Object.id == object_id)).one()
+
+        if not usr_obj.read_perm:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to read")
+
+        files = db.query(File).filter(File.object_id == obj.id).all()
+
+        files = [FileResponse(
+            created_at=f.created_at,
+            file_id=f.id,
+            metadata=await file_svc.get_file_metadata(f.id))
+            for f in files]
+
+        return files
+    except sqlalchemy.exc.NoResultFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+@router.get("/{object_id}/get")
+async def object_key_get(namespace_id: str, object_id: uuid.UUID, version_id: uuid.UUID | None = None,
+                         db: Session = Depends(get_pg_db),
+                         user: User = Depends(get_user)):
+    try:
+        obj, usr_obj = db.query(Object, UserObject) \
+            .filter((UserObject.user_id == user.id) &
+                    (Object.id == UserObject.object_id) &
+                    (Object.id == object_id)).one()
+
+        if not usr_obj.read_perm:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to read")
+        if version_id is None:
+            file = db.query(File) \
+                .filter(File.object_id == obj.id).order_by(
+                desc(File.created_at)
+            ).first()
+
+            if file is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+            file_metadata = await file_svc.get_file_metadata(file.id)
+
+        else:
+            file = db.query(File) \
+                .filter((File.object_id == obj.id) & (File.id == version_id)).order_by(
+                desc(File.created_at)
+            ).first()
+
+            if file is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+            file_metadata = await file_svc.get_file_metadata(file.id)
+
+        if not (file_metadata is None or file is None):
+            print(mimetypes.guess_type(file_metadata["filename"])[0])
+            mime_type = mimetypes.guess_type(file_metadata["filename"])[0] or 'text/plain'
+            b = filesystem.read_file_fs(file)
+            return Response(content=b, media_type=mime_type)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
     except sqlalchemy.exc.NoResultFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 

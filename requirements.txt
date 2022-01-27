@@ -28,3 +28,4 @@ uvicorn==0.17.0.post1
 uvloop==0.16.0
 watchgod==0.7
 websockets==10.1
+zstandard==0.17.0

@@ -1,4 +1,6 @@
 from datetime import datetime
+
+from mongoengine import Document, StringField, UUIDField
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import Column, String, ForeignKey, Boolean, DateTime
@@ -8,6 +10,12 @@ from passlib.context import CryptContext
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
+
+
+class FileMetadata(Document):
+    filename = StringField(max_length=100)
+    file_id = UUIDField(primary_key=True)
+    pass
 
 
 class User(Base):
@@ -45,7 +53,7 @@ class File(Base):
 
 class Object(Base):
     __tablename__ = 'objects'
-    id = Column('id', UUID(as_uuid=True),primary_key=True, default=uuid.uuid4)
+    id = Column('id', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     keyname = Column('keyname', String(1024), index=True, nullable=False)
     files = relationship("File", back_populates="object")
     permissions = relationship("UserObject", back_populates="object")
