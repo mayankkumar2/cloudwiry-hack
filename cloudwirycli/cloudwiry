@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+import base64
+import getpass
+import os
+import sys
+import click
+import requests
+import tabulate
+
+
+@click.group()
+def cli():
+    pass
+
+
+BASEURL = "https://cloudwiry.mayankkumar.ml"
+
+token: str | None = None
+username: str | None = None
+usr_id: str | None = None
+
+
+def do_request(request_handler, url: str, payload: dict | None = None):
+    response = request_handler(url, json=payload, headers={"Authorization": f"Bearer {token}"})
+    return response.json(), response.status_code
+
+
+def login(username: str, password: str) -> str:
+    r = requests.post(f"{BASEURL}/api/v1/user/login", json={
+        "username": username,
+        "password": password
+    })
+    return r.json()["token"]
+
+
+def register(username: str, password: str):
+    response, status = do_request(requests.post,
+                                  f"{BASEURL}/api/v1/user/create", {
+                                      "username": username,
+                                      "password": password
+                                  })
+    if status not in [201]:
+        error_message("failed to create the user")
+    else:
+        print("user created successfully!")
+
+
+def fetch_me():
+    global username, usr_id
+    response, status_code = do_request(requests.get, f"{BASEURL}/api/v1/user/me?access_token={token}")
+    if status_code not in [200]:
+        error_message("credentials invalid! login again")
+    username = response["username"]
+    usr_id = response["id"]
+
+
+def save_credential(_token: str):
+    with open(".cloudwirycli", "w+") as f:
+        f.write(_token)
+        f.close()
+
+
+def load_config():
+    global token
+    if token is None:
+        try:
+            with open(".cloudwirycli") as f:
+                token = f.read()
+                f.close()
+            fetch_me()
+        except:
+            error_message("token not available. login first.")
+
+
+@click.command(name="login")
+@click.argument('username')
+def login_command(username):
+    password = getpass.getpass()
+    try:
+        _token = login(username, password)
+        save_credential(_token)
+        print("[*] login successful")
+    except Exception as e:
+        print(e)
+        error_message("[X] login failed")
+
+
+@click.command(name="register")
+@click.argument('username')
+def reg_command(username):
+    password = getpass.getpass()
+    register(username, password)
+
+
+def error_message(msg: str):
+    print(msg)
+    sys.exit(1)
+
+
+def print_namespace():
+    response, status_code = do_request(requests.get, f"{BASEURL}/api/v1/namespace/list?access_token={token}")
+    if status_code != 200:
+        error_message("request failed!")
+    print(tabulate.tabulate(response, headers=["namespace"]))
+
+
+def print_objects(namespace):
+    response, status_code = do_request(requests.get, f"{BASEURL}/api/v1/namespace/{namespace}/object/list")
+    if status_code not in [200]:
+        error_message("request failed to fetch objects from the namespace")
+    else:
+        rows = [r.values() for r in response]
+        if len(rows) == 0:
+            print("Nothing to show")
+        else:
+            heads = response[0].keys()
+            print(tabulate.tabulate(rows, headers=heads))
+
+
+@click.command(name="list")
+@click.argument("target_resource")
+@click.option("--namespace")
+def list_command(target_resource: str, namespace: str | None = None):
+    load_config()
+    if "namespaces" == target_resource:
+        print_namespace()
+    elif "objects" == target_resource:
+        print_objects(namespace or username)
+
+
+@click.command(name="push")
+@click.argument("key")
+@click.argument("FILE_PATH")
+def push_argument(key, file_path):
+    load_config()
+    if not os.path.exists(file_path) or os.path.isdir(file_path):
+        print("path doesn't exist or is a directory")
+    else:
+        with open(file_path, "rb") as f:
+            filename = os.path.basename(file_path)
+            file_content = base64.b64encode(f.read()).decode('utf-8')
+            response, status_code = do_request(requests.post,
+                                               f"{BASEURL}/api/v1/namespace/file/create?access_token={token}&key={key}",
+                                               {
+                                                   "filename": filename,
+                                                   "content": file_content
+                                               })
+            if status_code in [409]:
+                print(f"[ {key} ] already exists!")
+            elif status_code not in [200, 201]:
+                print(status_code)
+
+                error_message("failed to put file!")
+            else:
+                print(f"file uploaded with key [ {key} ]")
+
+
+def find_object_namespace(object_key, namespace):
+    response, status_code = do_request(requests.get, f"{BASEURL}/api/v1/namespace/{namespace}/object/list")
+    if status_code not in [200]:
+        error_message("request failed to fetch objects from the namespace")
+    else:
+        obj = list(filter(lambda x: x.get("key_name") == object_key, response))
+        return obj
+
+
+def rename_object(orig_key, replacement_key, namespace):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response, status_code = do_request(requests.patch,
+                                           f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/rename?key={replacement_key}")
+        if status_code not in [200]:
+            error_message(
+                f"[X] operation failed to rename [ {orig_key} ] to [ {replacement_key} ] in namespace [ {namespace} ]")
+
+    print(f"[*] operation succeeded to rename [ {orig_key} ] to [ {replacement_key} ] in namespace [ {namespace} ]")
+
+
+def delete_object(orig_key, namespace):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response, status_code = do_request(
+            requests.delete,
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/delete")
+        if status_code not in [200]:
+            error_message(
+                f"[X] operation failed to delete [ {orig_key} ] in namespace [ {namespace} ]")
+
+    print(f"[*] operation succeeded to delete [ {orig_key} ] in namespace [ {namespace} ]")
+
+
+def update_object(orig_key, namespace, file_path):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        if not os.path.exists(file_path) or os.path.isdir(file_path):
+            print("path doesn't exist or is a directory")
+        else:
+            with open(file_path, "rb") as f:
+                filename = os.path.basename(file_path)
+                file_content = base64.b64encode(f.read()).decode('utf-8')
+                response, status_code = do_request(
+                    requests.put,
+                    f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/save",
+                    {"filename": filename, "content": file_content})
+                if status_code in [409]:
+                    print(f"[ {orig_key} ] already exists!")
+                elif status_code not in [200, 201]:
+                    error_message("failed to put file!")
+                else:
+                    print(f"file updated with key [ {orig_key} ] in namespace [ {namespace} ]")
+
+
+def print_versions(orig_key, namespace):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response, status_code = do_request(
+            requests.get,
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/versions")
+        if status_code not in [200]:
+            error_message(
+                f"[X] operation failed to fetch version history for [ {orig_key} ] in namespace [ {namespace} ]")
+        rows = [r.values() for r in response]
+        if len(rows) == 0:
+            print("Nothing to show")
+        else:
+            heads = response[0].keys()
+            print(tabulate.tabulate(rows, headers=heads))
+
+
+def add_user_perm_object(orig_key, namespace, new_user, update, read):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response, status_code = do_request(
+            requests.put,
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/permission/add?" +
+            f"username={new_user}&read_perm={read}&update_perm={update}")
+        if status_code not in [200]:
+            error_message(
+                f"[X] operation failed to add permission on [ {orig_key} ] in namespace [ {namespace} ]")
+
+    print(f"[*] operation succeeded to add permissions on [ {orig_key} ] in namespace [ {namespace} ] for {new_user}" +
+          f"\n Update: {update}\n Read: {read}")
+
+
+def rm_user_perm_object(orig_key, namespace, new_user):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response, status_code = do_request(
+            requests.delete,
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/permission/remove?" +
+            f"username={new_user}")
+        if status_code not in [200]:
+            error_message(
+                f"[X] operation failed to remove permission on [ {orig_key} ] in namespace [ {namespace} ]")
+
+    print(
+        f"[*] operation succeeded to remove permissions on [ {orig_key} ] in namespace [ {namespace} ] for {new_user}")
+
+
+def download_file(orig_key, namespace, version):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response = requests.get(
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/get"
+            f"?access_token={token}{ '' if version is None else f'&version_id={version}' }",
+        )
+        if response.status_code not in [200]:
+            print(response.status_code, response.text,      f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/get"
+            f"?access_token={token}")
+            error_message('[X] failed to fetch the required file')
+        else:
+            filename = os.path.basename(orig_key)
+            with open(filename, 'wb') as f:
+                f.write(response.content)
+                f.close()
+                print(f"[*] successfully save to {filename}")
+
+
+def view_file(orig_key, namespace, version):
+    obj = find_object_namespace(orig_key, namespace)
+    if len(obj) == 0 or (len(obj) > 0 and obj[0].get("object_id") is None):
+        error_message(f"object with the key [ {orig_key} ] not found")
+    else:
+        response = requests.get(
+            f"{BASEURL}/api/v1/namespace/{namespace}/object/{obj[0].get('object_id')}/get"
+            f"?access_token={token}{ '' if version is None else f'&version_id={version}' }",
+        )
+        if response.status_code not in [200]:
+            error_message('[X] failed to fetch the required file')
+        else:
+            print(response.text)
+
+
+@click.command(name="object")
+@click.argument("object_key")
+@click.option("--rename")
+@click.option("--namespace")
+@click.option("--update")
+@click.option("--delete", is_flag=True)
+@click.option("--versions", is_flag=True)
+@click.option("--add-user")
+@click.option("--rm-user")
+@click.option("--allow-update", is_flag=True)
+@click.option("--allow-read", is_flag=True)
+def object_command(object_key,
+                   rename: str | None = None,
+                   namespace: str | None = None,
+                   update: str | None = None,
+                   delete: bool = False,
+                   versions: bool = False,
+                   add_user: str | None = None, rm_user: str | None = None, allow_update=False, allow_read=False):
+    load_config()
+    if not (rename is None):
+        rename_object(object_key, rename, namespace or username)
+    elif not (update is None):
+        update_object(object_key, namespace or username, update)
+    elif delete:
+        delete_object(object_key, namespace or username)
+    elif versions:
+        print_versions(object_key, namespace or username)
+    elif not (add_user is None):
+        if (not allow_update) and (not allow_read):
+            error_message("--allow-read/--allow-update flag required.")
+        add_user_perm_object(object_key, namespace or username, add_user, allow_update, allow_read)
+    elif not (rm_user is None):
+        rm_user_perm_object(object_key, namespace or username, rm_user)
+
+
+@click.command(name="download")
+@click.argument("object_key")
+@click.option("--version")
+@click.option("--namespace")
+@click.option("--version")
+def download_command(object_key,
+                     version: str | None = None,
+                     namespace: str | None = None):
+    load_config()
+    download_file(object_key, namespace or username, version)
+
+
+@click.command(name="view")
+@click.argument("object_key")
+@click.option("--version")
+@click.option("--namespace")
+@click.option("--version")
+def view_command(object_key,
+                 version: str | None = None,
+                 namespace: str | None = None):
+    load_config()
+    view_file(object_key, namespace or username, version)
+
+
+@click.command(name="whoami")
+def whoami_command():
+    load_config()
+    print(f"You're {username} [ {usr_id} ]")
+
+
+cli.add_command(login_command)
+cli.add_command(list_command)
+cli.add_command(push_argument)
+cli.add_command(object_command)
+cli.add_command(download_command)
+cli.add_command(view_command)
+cli.add_command(reg_command)
+cli.add_command(whoami_command)
+
+if __name__ == '__main__':
+    cli()
