@@ -1,0 +1,65 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  worker:
+    build: .
+    environment:
+      MONGO_URL: mongodb://root:root@mongo:27017/admin?directConnection=true&serverSelectionTimeoutMS=2000
+      RABBITMQ_HOST: rabbitmq
+      POSTGRES_URL: postgresql://postgres:root@postgres:5432/postgres
+      SECRET: 09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
+      ALGORITHM: HS256
+      DATA_PATH: /var/data
+    volumes:
+      - .:/code
+      - volume01:/var/data
+    working_dir: /code
+    command: [ "python3", "worker.py" ]
+    depends_on:
+      - api
+      - rabbitmq
+      - mongo
+      - postgres
+    restart: always
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_URL: mongodb://root:root@mongo:27017/admin?directConnection=true&serverSelectionTimeoutMS=2000
+      RABBITMQ_HOST: rabbitmq
+      POSTGRES_URL: postgresql://postgres:root@postgres:5432/postgres
+      SECRET: 09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
+      ALGORITHM: HS256
+      DATA_PATH: /var/data
+    volumes:
+      - .:/code
+      - volume01:/var/data
+    working_dir: /code
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: always
+    depends_on:
+      - mongo
+      - postgres
+      - rabbitmq
+  mongo:
+    environment:
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_INITDB_ROOT_USERNAME: root
+    image: mongo
+    volumes:
+      - mongo_volume:/etc/mongo
+    restart: always
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: root
+    image: postgres
+    volumes:
+      - pg_volume:/var/lib/postgresql/data
+    restart: always
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    restart: always
+volumes:
+  volume01: {}
+  pg_volume: {}
+  mongo_volume: {}
