@@ -13,7 +13,7 @@ from schemas.user_response import LoginResponse, UserResponse
 router = APIRouter()
 
 
-@router.post("/create")
+@router.post("/create", status_code=status.HTTP_201_CREATED)
 def create_user(user: CreateUserRequest, db: Session = Depends(get_pg_db)):
     u = User(username=user.username)
     u.set_password(user.password)

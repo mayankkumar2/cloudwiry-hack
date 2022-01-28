@@ -16,7 +16,7 @@ from schemas.file_request import FileModel
 router = APIRouter()
 
 
-@router.post("/create")
+@router.post("/create", status_code=status.HTTP_201_CREATED)
 def create_file(f: FileModel, key: str, user: User = Depends(get_user), db: Session = Depends(get_pg_db)):
     try:
         key_count = db.query(UserObject).join(Object) \
