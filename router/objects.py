@@ -17,6 +17,7 @@ from schemas.object_response import ObjectsListResponse
 from factory.file_factory import FileFactory
 from router.permission import router as permission_router
 from service import file_svc
+from worker import delete_file
 
 router = APIRouter()
 
@@ -108,11 +109,15 @@ async def object_key_delete(namespace_id: str, object_id: uuid.UUID, db: Session
         if not usr_obj.owner:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not permitted to delete")
 
+        files = db.query(File).filter(File.object_id == obj.id).all()
+
         with db.connection() as con:
             con.execute(text("DELETE FROM user_objects WHERE object_id = :obj_id"), obj_id=obj.id)
             con.execute(text("DELETE FROM files WHERE object_id = :obj_id"), obj_id=obj.id)
             con.execute(text("DELETE FROM objects WHERE id = :obj_id"), obj_id=obj.id)
             con.execute(text("COMMIT"))
+        for f in files:
+            await delete_file(f.id.hex)
         return {
             "status": "success"
         }
@@ -180,7 +185,7 @@ async def object_key_get(namespace_id: str, object_id: uuid.UUID, version_id: uu
             file_metadata = await file_svc.get_file_metadata(file.id)
 
         if not (file_metadata is None or file is None):
-            print(mimetypes.guess_type(file_metadata["filename"])[0])
+            #print(mimetypes.guess_type(file_metadata["filename"])[0])
             mime_type = mimetypes.guess_type(file_metadata["filename"])[0] or 'text/plain'
             b = filesystem.read_file_fs(file)
             return Response(content=b, media_type=mime_type)

@@ -22,7 +22,6 @@ class UserObjectFactory:
             self.__update = update
 
     def create(self):
-        print(self.__obj.id)
         if self.__user_obj is None:
             self.__user_obj = UserObject(
                 user_id=self.__user.id,

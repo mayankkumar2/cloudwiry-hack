@@ -42,7 +42,6 @@ def create_file(f: FileModel, key: str, user: User = Depends(get_user), db: Sess
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return {
         "status": "success"
