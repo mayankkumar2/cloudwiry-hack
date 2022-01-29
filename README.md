@@ -1,5 +1,10 @@
 # Cloudwiry Hack Sumission
 
+This hack presents my idea for a scalable blob storage file system. The interface for the service is using a CLI application. The hack uses ZStandard compression to save storage space on the servers. The hack employs message queues to remove dangling files on the server once a user requests a deletion. The hack also supports versioning of data, so all your files saved on the server are securely stored and you can randomly reference any version of it.
+
+[Documentation](https://cloudwiry.mayankkumar.ml/docs) <br>
+[Video Demo](https://youtu.be/tcknBteu4s4)
+
 ## features
 - [X] User authentication and session management
 - [X] Implementation of the blob storage server
